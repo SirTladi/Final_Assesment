@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, Image, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
 import { db } from './FireBase';
 import { collection, getDocs } from 'firebase/firestore';
+import * as Location from 'expo-location';
+import { Picker } from '@react-native-picker/picker';
 
 const BusinessListings = () => {
   const [businesses, setBusinesses] = useState([]);
+  const [filteredBusinesses, setFilteredBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [userLocation, setUserLocation] = useState(null);
 
   useEffect(() => {
     const fetchBusinesses = async () => {
@@ -13,24 +19,97 @@ const BusinessListings = () => {
         const querySnapshot = await getDocs(collection(db, 'businesses'));
         const businessList = querySnapshot.docs.map(doc => doc.data());
         setBusinesses(businessList);
+        setFilteredBusinesses(businessList);
       } catch (error) {
         console.log("Error fetching businesses: ", error);
       } finally {
         setLoading(false);
       }
     };
+
+    const getLocation = async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({});
+        setUserLocation(location.coords);
+      }
+    };
+
     fetchBusinesses();
+    getLocation();
   }, []);
+
+  useEffect(() => {
+    filterAndSortBusinesses();
+  }, [searchTerm, selectedCategory, userLocation]);
+
+  const filterAndSortBusinesses = () => {
+    let filteredList = businesses;
+
+    if (searchTerm) {
+      filteredList = filteredList.filter(business =>
+        business.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    if (selectedCategory) {
+      filteredList = filteredList.filter(business => business.category === selectedCategory);
+    }
+
+    if (userLocation) {
+      filteredList.sort((a, b) => {
+        const distanceA = calculateDistance(userLocation, a.location);
+        const distanceB = calculateDistance(userLocation, b.location);
+        return distanceA - distanceB;
+      });
+    }
+
+    setFilteredBusinesses(filteredList);
+  };
+
+  const calculateDistance = (userLocation, businessLocation) => {
+    const R = 6371;
+    const dLat = toRad(businessLocation.latitude - userLocation.latitude);
+    const dLon = toRad(businessLocation.longitude - userLocation.longitude);
+    const lat1 = toRad(userLocation.latitude);
+    const lat2 = toRad(businessLocation.latitude);
+
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+    return distance;
+  };
+
+  const toRad = (value) => value * Math.PI / 180;
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Nearby Businesses</Text>
       
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search by name"
+        value={searchTerm}
+        onChangeText={setSearchTerm}
+      />
+
+      <Picker
+        selectedValue={selectedCategory}
+        style={styles.picker}
+        onValueChange={(itemValue) => setSelectedCategory(itemValue)}
+      >
+        <Picker.Item label="All Categories" value="" />
+        <Picker.Item label="Restaurant" value="Restaurant" />
+        <Picker.Item label="Store" value="Store" />
+        <Picker.Item label="Service" value="Service" />
+      </Picker>
+
       {loading ? (
-        <ActivityIndicator size="large" color="#007bff" />
-      ) : businesses.length > 0 ? (
+        <ActivityIndicator size="large" color="#007bff" style={styles.loadingIndicator} />
+      ) : filteredBusinesses.length > 0 ? (
         <FlatList
-          data={businesses}
+          data={filteredBusinesses}
           keyExtractor={(item) => item.contact}
           renderItem={({ item }) => (
             <View style={styles.card}>
@@ -64,8 +143,31 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
+  searchInput: {
+    height: 50,
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    backgroundColor: '#fff',
+    borderColor: '#ddd',
+    borderWidth: 1,
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 15,
+  },
+  picker: {
+    height: 50,
+    width: '100%',
+    backgroundColor: '#fff',
+    borderColor: '#ddd',
+    borderWidth: 1,
+    marginBottom: 20,
+  },
+  loadingIndicator: {
+    marginTop: 20,
+  },
   listContainer: {
     paddingBottom: 20,
+    flexGrow: 1,
   },
   card: {
     backgroundColor: '#fff',
@@ -110,7 +212,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#555',
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: 40,
   },
 });
 
